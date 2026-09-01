@@ -197,12 +197,4 @@ Together, **SHAP + Grad-CAM** make the system *transparent, interpretable, and c
 * Integrate **federated learning** for privacy-preserving multi-hospital collaboration.
 * Introduce **auto-ML pipelines** for automated hyperparameter optimization and retraining.
 
----
 
-## Authors
-
-**22BCE2358 – Peethala Hamal Johny**
-**22BCE3815 – Vaka Abhilesh**
-
-
----
