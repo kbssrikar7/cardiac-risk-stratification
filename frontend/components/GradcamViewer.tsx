@@ -46,6 +46,14 @@ export default function GradcamViewer() {
         <input type="file" accept=".nii,.nii.gz" className="hidden" onChange={handleFile} />
       </label>
 
+      <p className="text-center text-xs text-foreground-muted">
+        Don&apos;t have an MRI file handy?{" "}
+        <a href="/sample_cardiac_mri.nii.gz" download className="text-accent underline underline-offset-2">
+          Download a sample volume
+        </a>{" "}
+        to try it (synthetic test data, not a real patient scan).
+      </p>
+
       {loading && <p className="text-sm text-foreground-muted">Segmenting myocardium and generating Grad-CAM overlay...</p>}
       {error && <p className="text-sm text-red-500">{error}</p>}
 
