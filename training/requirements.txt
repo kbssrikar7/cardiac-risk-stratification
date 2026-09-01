@@ -1,0 +1,22 @@
+# Training-time dependencies for heartriskstratificationq4.py and the scripts in
+# this directory. Pinned so radiomics feature values and model training are
+# reproducible, unlike previously (pyradiomics was installed via an unpinned
+# `pip install git+...`, and the xgboost/scikit-learn versions used at training
+# time were never recorded anywhere in the repo).
+
+# Radiomics extraction. PyPI's pyradiomics release fails to build against
+# current numpy (stale setup.py); this git commit is the version actually
+# verified working during the 2026-08-31 corrected re-extraction.
+pyradiomics @ git+https://github.com/AIM-Harvard/pyradiomics.git@8ed579383b44806651c463d5e691f3b2b57522ab
+
+numpy==1.26.4
+pandas==3.0.5
+scipy==1.17.1
+scikit-learn==1.9.0
+xgboost==3.2.0
+optuna==4.9.0
+imbalanced-learn==0.14.2
+torch==2.13.0
+tensorflow-cpu==2.15.0
+nibabel==5.2.1
+SimpleITK==2.3.1

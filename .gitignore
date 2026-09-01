@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+env/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Agent tooling state (local, not project config)
+.claude/
+.gnhf/
+
+# Data & Outputs
+emidec_data/
+predicted_masks/
+gradcam_results/
+training/data/
+
+# Notebooks checkpoints
+.ipynb_checkpoints/
+
+# OS
+Thumbs.db
+*.DS_Store
+
