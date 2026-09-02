@@ -194,4 +194,10 @@ Ordered by what's actually achievable without new institutional partnerships, no
 
 (A web-based clinical dashboard for real-time risk evaluation was also on this list - the FastAPI/Next.js app described above already is that, so it's been removed as a "future" item.)
 
+---
+
+## License
+
+MIT - see [LICENSE](LICENSE).
+
 
