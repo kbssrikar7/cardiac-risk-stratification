@@ -22,11 +22,11 @@ The infarct-burden features (`infarct_volume_cm3`, `infarct_pct_of_myocardium`, 
 
 ---
 
-## Modernized Architecture
+## Architecture
 
-The original prototype was a single Streamlit app (`app.py`). It has been re-architected into a decoupled backend/frontend stack; `app.py` is kept in the repo for reference only and is no longer the runtime entry point. `HeartRiskStratificationq3.ipynb` and `heartriskstratificationq4.py` (the training pipeline) are untouched.
+A decoupled backend/frontend stack. `HeartRiskStratificationq3.ipynb` and `heartriskstratificationq4.py` hold the model training and evaluation work; `training/` holds the automated training pipeline described below.
 
-**Backend (`backend/`)** - a FastAPI service. `backend/app/ml.py` holds the model-loading and inference logic (clinical LogisticRegression fallback model, a single calibrated XGBoost classifier, U-Net Grad-CAM utilities, and SHAP explainers via XGBoost's native `pred_contribs`), with a best-model-first/clinical-fallback behavior. The stacked XGBoost + Attention-MLP ensemble used in the original prototype was retired after permutation importance showed the Attention-MLP branch contributed zero signal - a single calibrated XGBoost model matches its accuracy with far less complexity. `backend/app/main.py` exposes it as REST endpoints:
+**Backend (`backend/`)** - a FastAPI service. `backend/app/ml.py` holds the model-loading and inference logic (clinical LogisticRegression fallback model, a single calibrated XGBoost classifier, U-Net Grad-CAM utilities, and SHAP explainers via XGBoost's native `pred_contribs`), with a best-model-first/clinical-fallback behavior. A single calibrated XGBoost model is used in production; a stacked XGBoost + Attention-MLP ensemble was evaluated and dropped after permutation importance showed the Attention-MLP branch contributed zero signal, so it matches the ensemble's accuracy with far less complexity. `backend/app/main.py` exposes it as REST endpoints:
 
 * `GET /health` - liveness check.
 * `POST /predict` - clinical inputs (age, LVEF, troponin, NT-proBNP) in, risk class + per-class probabilities out. Tries the calibrated XGBoost model first, falls back to the clinical-only model on failure.
@@ -39,10 +39,8 @@ All four endpoints (`/health`, `/predict`, `/shap`, `/gradcam`) have been verifi
 
 ### Live deployment
 
-* Backend: [Render](https://render.com) (Docker runtime, free plan), at `https://cardiac-risk-backend.onrender.com`. Render builds from a dedicated public mirror repo, [`kbssrikar7/cardiac-risk-backend`](https://github.com/kbssrikar7/cardiac-risk-backend), rather than this repo directly (see Redeploying below for why). Being on Render's free plan, the instance spins down after inactivity and the first request after a period of idleness can take up to a minute to respond while it wakes up.
+* Backend: [Render](https://render.com) (Docker runtime, free plan), at `https://cardiac-risk-backend.onrender.com`, deployed from a pre-built image (see Redeploying below). Being on Render's free plan, the instance spins down after inactivity and the first request after a period of idleness can take up to a minute to respond while it wakes up.
 * Frontend: Vercel, at `https://cardiac-risk-frontend.vercel.app`.
-
-Previously deployed on Railway; moved to Render because Railway requires a payment method on file even for its free trial credit, and Render's free web-service plan does not.
 
 The deployed frontend has been verified end-to-end in a real browser against the deployed backend: submitting the clinical-inputs form returns a real calibrated-XGBoost prediction and real SHAP contributions, with no console errors.
 
@@ -89,23 +87,18 @@ npm test
 
 ### Redeploying
 
-**Backend (Render):** Render's Docker runtime builds from a `Dockerfile` at the *root* of the git repo it's pointed at, so this project's backend is mirrored into a small, dedicated public repo, [`kbssrikar7/cardiac-risk-backend`](https://github.com/kbssrikar7/cardiac-risk-backend), laid out as:
-
-```
-Dockerfile                          # same content as backend/Dockerfile here, moved to root
-backend/app/{__init__,main,ml}.py   # copied from backend/app/
-backend/requirements.txt            # copied from backend/requirements.txt
-clinical_model.pkl, best_prognostic_model.pkl,
-unet_multiclass.h5, combined_radiomics_features.csv   # copied from the repo root
-```
-
-To redeploy after changing the backend, re-copy those files into a checkout of the mirror repo, commit, and push - Render's `autoDeploy` will pick up the push automatically. Or trigger a deploy of the current mirror `HEAD` directly via the API:
+**Backend (Render):** the Render service is configured for image-based deploys, not git-triggered ones. To redeploy after changing the backend, build and push a new image, then trigger a deploy against it:
 
 ```bash
+docker build -f backend/Dockerfile -t ghcr.io/kbssrikar7/cardiac-risk-backend:latest .
+docker push ghcr.io/kbssrikar7/cardiac-risk-backend:latest
+
 curl -X POST "https://api.render.com/v1/services/<service-id>/deploys" \
   -H "Authorization: Bearer $RENDER_API_KEY" -H "Content-Type: application/json" \
   -d '{"clearCache":"do_not_clear"}'
 ```
+
+`backend/Dockerfile` is built from the repo root (it copies the model artifacts and `backend/app` directly from this repo) - no separate deploy repo is involved.
 
 Env vars (e.g. `CORS_ORIGINS`, set to the frontend's stable production origin - see below) are set the same way, via `PUT /v1/services/<service-id>/env-vars`; changing them does not auto-restart the service, so follow up with a deploy trigger as above. Render's Docker services listen on port 7860 by default (`backend/Dockerfile`'s `ENV PORT=7860`).
 
