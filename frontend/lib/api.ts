@@ -75,13 +75,28 @@ export async function fetchShap(input: ClinicalInput): Promise<ShapResponse> {
   return res.json();
 }
 
-export async function fetchGradcam(file: File): Promise<GradcamResponse> {
+export async function fetchGradcam(
+  file: File,
+  onRetry?: (attempt: number, maxAttempts: number) => void
+): Promise<GradcamResponse> {
   const formData = new FormData();
   formData.append("file", file);
-  const res = await fetch(`${API_BASE_URL}/gradcam`, {
-    method: "POST",
-    body: formData,
-  });
-  if (!res.ok) throw new ApiError(res.status, await parseErrorDetail(res));
-  return res.json();
+
+  // The backend's free-tier CPU can get saturated during inference, which
+  // occasionally makes the platform's own load balancer reject a request
+  // with 503 before it reaches the app. A short retry clears this reliably.
+  const maxAttempts = 3;
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(`${API_BASE_URL}/gradcam`, {
+      method: "POST",
+      body: formData,
+    });
+    if (res.ok) return res.json();
+    if (res.status !== 503 || attempt === maxAttempts) {
+      throw new ApiError(res.status, await parseErrorDetail(res));
+    }
+    onRetry?.(attempt, maxAttempts);
+    await new Promise((resolve) => setTimeout(resolve, attempt * 3000));
+  }
+  throw new ApiError(503, "Service unavailable after retries.");
 }

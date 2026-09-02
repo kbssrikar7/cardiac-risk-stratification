@@ -9,6 +9,7 @@ export default function GradcamViewer() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [result, setResult] = useState<GradcamResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [retryStatus, setRetryStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   async function handleFile(e: ChangeEvent<HTMLInputElement>) {
@@ -17,6 +18,7 @@ export default function GradcamViewer() {
     setFileName(file.name);
     setResult(null);
     setError(null);
+    setRetryStatus(null);
 
     if (file.size > MAX_UPLOAD_BYTES) {
       setError(`File is too large (max ${MAX_UPLOAD_BYTES / (1024 * 1024)}MB).`);
@@ -26,12 +28,15 @@ export default function GradcamViewer() {
 
     setLoading(true);
     try {
-      const res = await fetchGradcam(file);
+      const res = await fetchGradcam(file, (attempt, maxAttempts) => {
+        setRetryStatus(`Service briefly unavailable, retrying (${attempt}/${maxAttempts - 1})...`);
+      });
       setResult(res);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Failed to generate Grad-CAM overlay.");
     } finally {
       setLoading(false);
+      setRetryStatus(null);
       e.target.value = "";
     }
   }
@@ -54,7 +59,11 @@ export default function GradcamViewer() {
         to try it (synthetic test data, not a real patient scan).
       </p>
 
-      {loading && <p className="text-sm text-foreground-muted">Segmenting myocardium and generating Grad-CAM overlay...</p>}
+      {loading && (
+        <p className="text-sm text-foreground-muted">
+          {retryStatus ?? "Segmenting myocardium and generating Grad-CAM overlay..."}
+        </p>
+      )}
       {error && <p className="text-sm text-red-500">{error}</p>}
 
       {result && (
