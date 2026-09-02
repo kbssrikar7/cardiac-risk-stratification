@@ -87,7 +87,7 @@ Two additional checks support this interpretation:
 
 **Limitations, stated plainly:**
 1. The training label is a deterministic rule over the same 4 clinical inputs used as features (Section 1), not a real clinical outcome. All accuracy figures should be read as "agreement with the rule," not "predictive of a real event."
-2. No-reflow segmentation fails completely at this dataset's scale (Section 4.1); the corresponding features are only real signal for the 100 ground-truth-masked patients.
+2. No-reflow segmentation fails completely at this dataset's scale (Section 4.1); the corresponding features are only real signal for the 100 ground-truth-masked patients. A class-weighted loss fix was attempted and did not resolve it (Section 9) - the root cause appears to be too few positive pixels/patients to learn the class from, not a fixable loss-function choice.
 3. Clinical-only predictions (no MRI uploaded) fall back to population-median values for all imaging-derived features, which can bias predictions toward the majority (Very High Risk) class regardless of how benign the 4 clinical inputs look in isolation - present in both the pre- and post-infarct-feature models equally, not introduced by this work. A rule-based cross-check is surfaced alongside every prediction specifically to catch this disagreement.
 4. All results are internal cross-validation on a single 150-patient cohort; no external validation cohort was available.
 
@@ -106,3 +106,27 @@ Extending the honest-ablation pattern from Section 5 to the README's other "futu
 **Result**: the fusion model does not generalize at all. Both variants (with and without infarct-burden features) score at chance level - AUC 0.537±0.108 (without) and 0.558±0.133 (with), against a 0.5 random baseline - despite 80 training epochs per fold. This was verified as genuine overfitting rather than a training bug: the identical model, fit and evaluated on the *same* data, reaches 100% training accuracy, confirming the architecture and gradient flow work correctly and the failure is purely a generalization failure at this sample size. This is a stronger, more definitive version of the Section 3 finding that the much simpler Attention-MLP branch contributed zero signal - here, a from-scratch-trained fusion head catastrophically overfits a training fold of roughly 120-150 resampled patients and learns nothing transferable to held-out ones.
 
 **Conclusion**: transformer-based fusion is not a viable improvement for this project at its current data scale, consistent with the literature reviewed before attempting it. The calibrated XGBoost model from Section 6 remains the production model. This negative result is reported as evidence, not omitted, per this project's practice of documenting ablations honestly regardless of outcome.
+
+## 9. No-reflow class-weighting attempt
+
+The 5-class U-Net (Section 4.1) scores exactly 0.0 Dice on no-reflow, the rarest class (0.017% of training pixels). Plain categorical cross-entropy barely penalizes a model for never predicting a class this rare, so the natural next attempt is a class-weighted loss.
+
+**Design** (`training/retrain_unet_5class_weighted.py`): median-frequency weighted categorical cross-entropy (Badrinarayanan et al., SegNet convention: `weight_c = median(class frequencies) / freq_c`), deliberately chosen over naive inverse-frequency weighting. Naive weighting would give no-reflow a ~5700x weight, close to the failure mode that has twice destabilized earlier U-Net retrain attempts in this project's history; median-frequency weighting keeps weights in a narrower range (background 0.014x, LV cavity 0.91x, myocardium 1.0x, infarction 7.7x, no-reflow 77.6x) while still making rare classes matter substantially more than they do unweighted. Data loading, patient-level split (same `RANDOM_STATE`, identical train/val patients), architecture, and augmentation are all unchanged from the unweighted run, so the loss function is the only variable.
+
+**A methodology bug was found and fixed before trusting any result.** The first run used `EarlyStopping(monitor="val_loss", restore_best_weights=True)`, unchanged from the unweighted script. But per-class Dice swung wildly between checkpoints (myocardium 0.007 -> 0.220 -> 0.037 across three 5-epoch checkpoints) while `val_loss` stayed flat at 0.106-0.109 across the same span - the weighted loss is dominated by the 77.6x term over a handful of pixels, making it a poor proxy for segmentation quality. `restore_best_weights` on that metric meant the final saved model was effectively whichever epoch won a coin flip, not a representative measurement. Fixed by adding a callback that computes per-class Dice every epoch and monitoring the mean over the four foreground classes (`val_mean_fg_dice`, excluding the trivially-easy background class) instead. The run below uses the corrected criterion.
+
+**Result** (same 20 held-out validation patients as every other number in this report):
+
+| class | unweighted Dice | weighted Dice | delta |
+|---|---|---|---|
+| background | 0.9974 | 0.9392 | -0.0582 |
+| LV cavity | 0.8844 | 0.2308 | -0.6536 |
+| myocardium | 0.7519 | 0.0693 | -0.6826 |
+| infarction | 0.2751 | 0.0000 | -0.2751 |
+| no-reflow | 0.0000 | 0.0000 | +0.0000 |
+
+No-reflow Dice remains exactly 0.0 - not an improvement. The model does predict no-reflow somewhere (16,857 pixels across the validation set), so this is not simple prediction-avoidance; those predictions have zero overlap with the true no-reflow pixels, meaning the model fires the label in the wrong locations rather than never firing it at all. Meanwhile every other foreground class suffers severe collateral damage: myocardium and LV cavity Dice both drop by roughly two-thirds, and infarction - which the unweighted model partially learned (0.2751 Dice) - collapses to 0 predicted pixels of that class anywhere in the validation set. This is not a favorable trade-off; it is a strictly worse model on every foreground class except the one it was meant to fix.
+
+**Why this is likely a data-scarcity problem, not a loss-weighting problem**: across all 100 ground-truth-masked training patients, only 40 have any no-reflow pixels at all, and the class totals 2,517 pixels project-wide (roughly 63 pixels per positive patient, spread thin across slices). The validation set alone has only 915 no-reflow pixels across 144 slices - about 6 pixels/slice on average. At that scale, Dice is dominated by whether the model happens to fire on a handful of pixels in the right place, which bounds what any loss-reweighting scheme can achieve without more positive examples to learn the class's appearance from.
+
+**Conclusion**: median-frequency class weighting does not fix no-reflow segmentation at this dataset's scale, and costs substantial accuracy elsewhere. `training/unet_5class_weighted.h5` is kept as a documented experiment artifact only - it must not be used by `compute_infarct_features_test.py` or any downstream feature extraction; the production segmentation model remains the unweighted `training/unet_5class.h5` from Section 4.1. This negative result is reported per this project's practice of documenting ablations honestly regardless of outcome, and narrows the no-reflow gap to what it actually is: a data-volume limitation, not a solvable loss-function tuning problem.
