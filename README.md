@@ -192,9 +192,13 @@ Together, **SHAP + Grad-CAM** make the system *transparent, interpretable, and c
 
 ## Future Improvements
 
-* Expand to **larger, multi-center MRI datasets** for stronger generalization.
-* Incorporate **transformer-based fusion models** for cross-modal learning.
-* Integrate **federated learning** for privacy-preserving multi-hospital collaboration.
-* Introduce **auto-ML pipelines** for automated hyperparameter optimization and retraining.
+Ordered by what's actually achievable without new institutional partnerships, not by ambition:
+
+* **AutoML pipeline for automated hyperparameter optimization and retraining** - in progress: `training/pipeline.py` searches hyperparameters *and* model family (XGBoost / LightGBM / logistic regression) via Optuna, evaluates under repeated stratified CV, and writes a versioned run record; `training/promote_model.py` gates production promotion on beating the currently-promoted run. See `training/runs/README.md`.
+* **Transformer-based fusion models for cross-modal learning** - in progress as an honest ablation, not an assumed upgrade: literature on small medical-imaging datasets (searched; see `training/TECHNICAL_REPORT.md`) confirms pure transformers need far more data than this project's 150 patients, and this project's own Attention-MLP branch already measured zero signal at this scale. A hybrid CNN-transformer variant is being evaluated under the same CV protocol as everything else, expecting a negative or marginal result worth reporting either way.
+* **Expand to larger, multi-center MRI datasets** for stronger generalization - not achievable solo; requires hospital partnerships, IRB approval, and data-sharing agreements this project doesn't currently have.
+* **Integrate federated learning** for privacy-preserving multi-hospital collaboration - downstream of the item above; there's nothing to federate across without multiple institutions already holding their own data.
+
+(A web-based clinical dashboard for real-time risk evaluation was also on this list - the FastAPI/Next.js app described above already is that, so it's been removed as a "future" item.)
 
 

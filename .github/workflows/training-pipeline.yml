@@ -1,0 +1,63 @@
+name: Training pipeline
+
+# Runs training/pipeline.py in CI so every change to the training code
+# produces a reviewable, versioned record (uploaded as build artifacts)
+# instead of relying on trusting an uncommitted local run. Free-tier minutes
+# comfortably cover this: the pipeline itself runs in ~1-2 minutes against
+# this project's 150-row dataset.
+#
+# This workflow does NOT promote anything to production - see
+# training/promote_model.py, which is a separate, explicit, human-run step.
+
+on:
+  workflow_dispatch:
+    inputs:
+      use_infarct_features:
+        description: "Include the infarct-burden features"
+        type: boolean
+        default: true
+      n_trials:
+        description: "Optuna trials"
+        type: number
+        default: 60
+      families:
+        description: "Model families to search over (space-separated)"
+        type: string
+        default: "xgboost lightgbm logreg"
+  push:
+    branches: [main]
+    paths:
+      - "training/pipeline.py"
+      - "training/common.py"
+      - "training/promote_model.py"
+      - "training/requirements-pipeline.txt"
+
+jobs:
+  run-pipeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install pipeline dependencies
+        run: pip install -r training/requirements-pipeline.txt
+
+      - name: Run pipeline
+        working-directory: training
+        run: |
+          python pipeline.py \
+            --n-trials "${{ inputs.n_trials || 60 }}" \
+            --families ${{ inputs.families || 'xgboost lightgbm logreg' }} \
+            $([ "${{ inputs.use_infarct_features }}" = "false" ] && echo "--no-infarct-features") \
+            --run-name "ci-${{ github.run_id }}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: training-run-${{ github.run_id }}
+          path: |
+            training/runs/*.json
+            training/runs/*.png
+          retention-days: 90

@@ -19,6 +19,17 @@ predicted_masks/
 gradcam_results/
 training/data/
 
+# Local Optuna trial cache - the durable, reviewable output is
+# training/runs/*.json, not the raw trial database.
+training/optuna_studies.db
+
+# Per-run candidate model artifacts from training/pipeline.py - reproducible
+# from the run's recorded git commit + hyperparameters (see training/runs/*.json,
+# which ARE tracked). Only the promoted model lives long-term, at the repo
+# root (best_prognostic_model.pkl), already tracked via Git LFS.
+training/runs/*.pkl
+training/runs/*.png
+
 # Notebooks checkpoints
 .ipynb_checkpoints/
 

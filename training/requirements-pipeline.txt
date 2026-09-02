@@ -1,0 +1,18 @@
+# Dependencies for training/pipeline.py and training/promote_model.py only.
+# Deliberately separate from training/requirements.txt: the full file also
+# serves the radiomics-extraction and segmentation scripts, which need
+# pyradiomics (built from git), tensorflow-cpu, torch, and SimpleITK - none
+# of which pipeline.py imports. Keeping this list minimal keeps CI installs
+# fast (no git-built pyradiomics, no TF/torch download) for what's a
+# lightweight, tabular-only script.
+
+numpy==1.26.4
+pandas==3.0.5
+scipy==1.17.1
+scikit-learn==1.9.0
+xgboost==3.2.0
+lightgbm==4.7.0
+optuna==4.9.0
+imbalanced-learn==0.14.2
+matplotlib==3.8.4
+joblib==1.5.3
