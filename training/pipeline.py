@@ -33,11 +33,11 @@ from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.model_selection import StratifiedKFold, train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler, label_binarize
+from sklearn.preprocessing import StandardScaler, label_binarize
 import lightgbm as lgb
 import xgboost as xgb
 
-from common import RANDOM_STATE, brier_calibration_report, dynamic_resample, greedy_correlation_prune, repeated_cv_eval, summarize
+from common import RANDOM_STATE, brier_calibration_report, dynamic_resample, greedy_correlation_prune, repeated_cv_eval, risk_score_label_mapping, summarize
 
 TRAINING_DIR = Path(__file__).parent
 REPO_ROOT = TRAINING_DIR.parent
@@ -79,9 +79,8 @@ def load_dataset(use_infarct_features: bool, corr_threshold: float):
     print(f"Radiomics: {len(radiomic_cols)} -> {len(kept_radiomic)} after pruning |corr|>{corr_threshold} (dropped {len(dropped)})")
     print(f"Final feature set: {len(feature_columns)} features ({len(non_radiomic_cols)} non-radiomic + {len(kept_radiomic)} radiomic)")
 
-    le = LabelEncoder()
-    y = le.fit_transform(df["Risk_Score"].astype(str))
-    label_mapping = dict(zip(range(len(le.classes_)), le.classes_))
+    y = df["Risk_Score"].astype(int).to_numpy()
+    label_mapping = risk_score_label_mapping(df)
     return df, X_full[feature_columns], y, label_mapping, feature_columns
 
 

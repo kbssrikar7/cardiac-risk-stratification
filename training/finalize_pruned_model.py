@@ -10,11 +10,13 @@ import numpy as np
 import pandas as pd
 import joblib
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline as ImbPipeline
 import xgboost as xgb
+
+from common import risk_score_label_mapping
 
 RANDOM_STATE = 42
 CSV_PATH = "combined_radiomics_features_FIXED.csv"
@@ -59,9 +61,8 @@ def main():
     X = X_full[feature_columns]
     print(f"Using {len(feature_columns)} features ({len(clinical_cols)} clinical + {len(kept_radiomic)} radiomics)")
 
-    le = LabelEncoder()
-    y = le.fit_transform(df["Risk_Score"].astype(str))
-    label_mapping = dict(zip(range(len(le.classes_)), le.classes_))
+    y = df["Risk_Score"].astype(int).to_numpy()
+    label_mapping = risk_score_label_mapping(df)
 
     best_params = {
         "max_depth": 7, "learning_rate": 0.01, "n_estimators": 200, "subsample": 0.8,

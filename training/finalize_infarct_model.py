@@ -13,11 +13,13 @@ import numpy as np
 import pandas as pd
 import joblib
 from sklearn.calibration import CalibratedClassifierCV
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import StandardScaler
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline as ImbPipeline
 import xgboost as xgb
+
+from common import risk_score_label_mapping
 
 RANDOM_STATE = 42
 BASE_CSV = "combined_radiomics_features_FIXED.csv"
@@ -63,9 +65,8 @@ def main():
     merged = base_df.merge(infarct_all, on="PatientID", how="inner")
     print(f"Merged dataset: {merged.shape}, using {len(feature_columns)} features")
 
-    le = LabelEncoder()
-    y = le.fit_transform(merged["Risk_Score"].astype(str))
-    label_mapping = dict(zip(range(len(le.classes_)), le.classes_))
+    y = merged["Risk_Score"].astype(int).to_numpy()
+    label_mapping = risk_score_label_mapping(merged)
 
     X = merged[feature_columns]
     scaler = StandardScaler()

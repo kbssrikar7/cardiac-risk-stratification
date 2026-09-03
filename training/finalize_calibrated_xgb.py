@@ -30,7 +30,9 @@ from sklearn.calibration import CalibratedClassifierCV, calibration_curve
 from sklearn.metrics import (accuracy_score, balanced_accuracy_score, brier_score_loss,
                               classification_report, f1_score, roc_auc_score)
 from sklearn.model_selection import RepeatedStratifiedKFold, StratifiedKFold, cross_validate, train_test_split
-from sklearn.preprocessing import LabelEncoder, StandardScaler, label_binarize
+from sklearn.preprocessing import StandardScaler, label_binarize
+
+from common import risk_score_label_mapping
 from imblearn.over_sampling import SMOTE
 from imblearn.under_sampling import RandomUnderSampler
 from imblearn.pipeline import Pipeline as ImbPipeline
@@ -59,9 +61,8 @@ def main():
     df = pd.read_csv(CSV_PATH)
     drop_cols = [c for c in ["PatientID", "Risk_Category", "Reasoning"] if c in df.columns]
     X_full = df.drop(columns=drop_cols + ["Risk_Score"], errors="ignore")
-    le = LabelEncoder()
-    y_full = le.fit_transform(df["Risk_Score"].astype(str))
-    label_mapping = dict(zip(range(len(le.classes_)), le.classes_))
+    y_full = df["Risk_Score"].astype(int).to_numpy()
+    label_mapping = risk_score_label_mapping(df)
     all_classes = sorted(np.unique(y_full))
     print("Classes:", label_mapping, " n =", len(y_full))
 

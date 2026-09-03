@@ -16,6 +16,29 @@ from imblearn.pipeline import Pipeline as ImbPipeline
 RANDOM_STATE = 42
 
 
+def risk_score_label_mapping(df):
+    """Maps each Risk_Score value (0-3) to its human-readable Risk_Category
+    string, read directly from the data instead of assumed.
+
+    Every finalize_*.py / pipeline.py script used
+    `LabelEncoder().fit_transform(df["Risk_Score"].astype(str))` to build `y`,
+    then reused `le.classes_` as the label_mapping - but classes_ from that
+    call is just the sorted unique *Risk_Score strings* ('0','1','2','3'), not
+    the actual risk category names. The trained model and every CV metric are
+    unaffected (Risk_Score is already a clean 0-3 ordinal target), but every
+    model pickled this way had label_mapping = {0: '0', 1: '1', ...} baked in,
+    so any consumer mapping a predicted index back to a label via
+    label_mapping[idx] got a bare digit string instead of e.g. 'Low Risk'.
+    Found via E2E testing against the live /predict endpoint.
+    """
+    return (
+        df[["Risk_Score", "Risk_Category"]]
+        .drop_duplicates()
+        .set_index("Risk_Score")["Risk_Category"]
+        .to_dict()
+    )
+
+
 def dynamic_resample(X, y, random_state=RANDOM_STATE):
     unique, counts = np.unique(y, return_counts=True)
     maj_class, maj_count = unique[np.argmax(counts)], counts.max()
