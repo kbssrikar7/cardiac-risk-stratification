@@ -17,6 +17,20 @@ import numpy as np
 import pandas as pd
 import joblib
 
+# Imported eagerly (unlike tensorflow/nibabel/SimpleITK/shap below, which stay
+# lazy since they're genuinely optional depending on which endpoint is hit).
+# xgboost is needed by the primary /predict and /shap paths, and both
+# unpickling a stored XGBClassifier (via joblib.load) and importing xgboost
+# directly trigger the same circular submodule imports (xgboost.callback,
+# xgboost.sklearn, xgboost.training) - safe from one thread at module load
+# time, but two request threads racing to trigger it for the first time
+# concurrently (as /predict and /shap do, fired in parallel by the frontend)
+# can hit Python's import system mid-initialization and raise ImportError/
+# KeyError, silently downgrading /predict to the clinical-only fallback with
+# no logged error. Found via a real browser E2E test against a freshly
+# started backend.
+import xgboost as xgb
+
 from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.linear_model import LogisticRegression
 
@@ -180,8 +194,6 @@ def shap_explain_instance(assets, age: float, lvef: float, troponin: float, ntpr
 
 def try_shap_from_best_model(clinical_assets, age: float, lvef: float, troponin: float, ntprobnp: float):
     """SHAP explanation using best_prognostic_model.pkl, matching app.py's primary SHAP path."""
-    import xgboost as xgb
-
     if not os.path.exists(BEST_XGB_PATH) or not os.path.exists(CSV_PATH):
         raise FileNotFoundError("best_prognostic_model.pkl or CSV not found")
     best_assets = _load_joblib_cached(BEST_XGB_PATH)

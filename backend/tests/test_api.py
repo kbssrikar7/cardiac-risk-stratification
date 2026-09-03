@@ -10,13 +10,18 @@ this suite is to catch a divergence from app.py's original behavior.
 import base64
 import io
 import os
+import subprocess
+import sys
 import tempfile
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app import ml
 from app.main import app
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 @pytest.fixture(scope="module")
@@ -113,6 +118,59 @@ def test_predict_happy_path(client):
 def test_predict_validation_rejects_out_of_bounds(client, payload):
     resp = client.post("/predict", json=payload)
     assert resp.status_code == 422
+
+
+def test_predict_and_shap_concurrently_on_a_cold_process_both_use_the_real_model():
+    """Regression test for a real bug found via browser E2E testing: the
+    frontend fires /predict and /shap in parallel on every submission
+    (Promise.allSettled). On a freshly started backend, both handlers race to
+    trigger the first `import xgboost` - one via unpickling a stored
+    XGBClassifier inside joblib.load, the other via try_shap_from_best_model's
+    own import - and xgboost's circular submodule imports
+    (callback/sklearn/training) aren't safe against two threads racing to
+    import them for the first time simultaneously. This silently downgraded
+    /predict to the clinical_only fallback and /shap to a different, less
+    accurate model with no logged error. Fixed by importing xgboost eagerly
+    at ml.py's module load time instead of lazily inside request handlers.
+    Runs in a real fresh subprocess since the bug only reproduces on a truly
+    cold import - the test process itself already has xgboost imported.
+    """
+    script = """
+import sys, threading
+sys.path.insert(0, "backend")
+from app import ml
+
+errors = []
+
+def call_predict():
+    try:
+        ml.predict_with_calibrated_xgb(74, 35, 6.7, 5627)
+    except Exception as e:
+        errors.append(("predict", repr(e)))
+
+def call_shap():
+    try:
+        assets = ml.load_or_train_clinical_model()
+        ml.try_shap_from_best_model(assets, 74, 35, 6.7, 5627)
+    except Exception as e:
+        errors.append(("shap", repr(e)))
+
+t1 = threading.Thread(target=call_predict)
+t2 = threading.Thread(target=call_shap)
+t1.start(); t2.start()
+t1.join(); t2.join()
+if errors:
+    print("ERRORS:", errors)
+    sys.exit(1)
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, f"stdout={result.stdout}\nstderr={result.stderr}"
 
 
 # -----------------------------
