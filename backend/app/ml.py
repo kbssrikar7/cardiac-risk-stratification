@@ -350,6 +350,86 @@ def preprocess_volume_for_unet(vol: np.ndarray, target_size=(128, 128)):
     return X
 
 
+# Center-crop fractions searched by localize_and_preprocess_volume, widest first.
+LOCALIZATION_CROP_FRACTIONS = (1.0, 0.8, 0.65, 0.5, 0.35)
+
+
+def _center_crop_box(height: int, width: int, frac: float):
+    if frac >= 1.0:
+        return (0, height, 0, width)
+    ch, cw = max(1, int(round(height * frac))), max(1, int(round(width * frac)))
+    y0 = (height - ch) // 2
+    x0 = (width - cw) // 2
+    return (y0, y0 + ch, x0, x0 + cw)
+
+
+def localize_and_preprocess_volume(unet_model, vol: np.ndarray, target_size=(128, 128),
+                                    crop_fractions=LOCALIZATION_CROP_FRACTIONS):
+    """NOT used by generate_gradcam_overlay - kept only as a documented,
+    tested, and REJECTED attempt (see TECHNICAL_REPORT.md Section 11). Do not
+    wire this into the live pipeline without re-validating against ground
+    truth first.
+
+    Attempted test-time fix for a real generalization failure: the model,
+    trained only on EMIDEC (whose acquisition protocol crops tightly on the
+    heart), predicted 100% background at 1.0 confidence on every pixel of a
+    real external LGE-MRI scan whose heart was a smaller, off-center feature
+    in a wider field. The idea: search a small set of center-crop fractions
+    per slice and keep whichever crop's resize gives the highest total
+    cavity+myocardium probability mass, instead of always the full-frame
+    resize.
+
+    This looked like it worked on the failing external case (0 detected
+    pixels -> a real, correctly-located partial detection) and even
+    increased predicted pixel *counts* on several EMIDEC cases - but pixel
+    count is not accuracy. Validated against real ground-truth Dice on 15
+    EMIDEC training patients and found to regress it badly: mean myocardium
+    Dice 0.833 -> 0.528, cavity Dice 0.884 -> 0.781. The crop search picks
+    tighter crops that make the network predict larger, less accurate blobs,
+    not more correct ones - confirmed via real Dice, not assumed from pixel
+    counts. The framing-mismatch limitation this was meant to fix remains
+    open; a model trained on more acquisition protocols and explicit crop
+    augmentation is the durable fix, not a test-time crop search.
+
+    Returns (X, crop_boxes): X has the same shape as preprocess_volume_for_unet's
+    output; crop_boxes[i] = (y0, y1, x0, x1) is the pixel box (in the original
+    slice's coordinates) chosen for slice i, needed to crop the display image
+    to match what was actually fed to the model.
+    """
+    import tensorflow as tf
+
+    vol = vol.astype(np.float32)
+    vol = (vol - vol.min()) / (vol.max() - vol.min() + 1e-8)
+    n_slices = vol.shape[2]
+    n_crops = len(crop_fractions)
+    height, width = vol.shape[0], vol.shape[1]
+
+    boxes_by_slice = [_center_crop_box(height, width, f) for f in crop_fractions]
+
+    batch = np.zeros((n_slices * n_crops,) + target_size + (1,), dtype=np.float32)
+    idx = 0
+    for i in range(n_slices):
+        sl = vol[:, :, i]
+        for (y0, y1, x0, x1) in boxes_by_slice:
+            cropped = sl[y0:y1, x0:x1]
+            resized = tf.image.resize(cropped[..., None], target_size, method="bilinear").numpy()
+            batch[idx] = resized
+            idx += 1
+
+    preds = unet_model.predict(batch, verbose=0)  # (n_slices*n_crops, h, w, C)
+    foreground_mass = preds[..., 1:].sum(axis=(1, 2, 3))
+
+    X = np.zeros((n_slices,) + target_size + (1,), dtype=np.float32)
+    chosen_boxes = []
+    for i in range(n_slices):
+        scores = foreground_mass[i * n_crops:(i + 1) * n_crops]
+        best_j = int(np.argmax(scores))
+        X[i] = batch[i * n_crops + best_j]
+        chosen_boxes.append(boxes_by_slice[best_j])
+
+    return X, chosen_boxes
+
+
 def generate_gradcam_overlay(unet_model, vol: np.ndarray, target_class_idx: int = 2):
     import tensorflow as tf
     from PIL import Image
