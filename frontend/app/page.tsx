@@ -52,7 +52,7 @@ export default function Home() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight text-foreground">Cardiac Risk Stratification</h1>
         <p className="mt-1 text-sm text-foreground-muted">
-          Multi-modal risk assessment from clinical biomarkers and cardiac MRI
+          Clinical risk assessment with SHAP explainability, plus cardiac MRI segmentation and Grad-CAM visualization
         </p>
       </header>
 
