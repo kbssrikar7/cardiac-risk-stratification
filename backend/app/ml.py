@@ -334,17 +334,54 @@ def load_nii_volume(path: str):
     itk_img = sitk.ReadImage(path)
     vol = sitk.GetArrayFromImage(itk_img)  # Z, Y, X
     vol = np.transpose(vol, (2, 1, 0))     # X, Y, Z
-    return vol
+    spacing_xy = float(itk_img.GetSpacing()[0])
+    return vol, spacing_xy
 
 
-def preprocess_volume_for_unet(vol: np.ndarray, target_size=(128, 128)):
+# Median in-plane spacing across the 100-patient EMIDEC training cohort -
+# matches training/imaging_common.py's TARGET_INPLANE_SPACING_MM exactly.
+# The live unet_multiclass.h5 (promoted after TECHNICAL_REPORT.md Section 14)
+# was trained on inputs resampled to this spacing; serving it with mismatched
+# preprocessing would silently degrade every prediction.
+TARGET_INPLANE_SPACING_MM = 1.4583333730697632
+
+
+def preprocess_volume_for_unet(vol: np.ndarray, spacing_xy: float = TARGET_INPLANE_SPACING_MM,
+                                target_size=(128, 128), percentile_low: float = 1.0, percentile_high: float = 99.0):
+    """Matches training/retrain_unet_patient_split_isotropic.py's preprocessing
+    (run with --percentile-low 1 --percentile-high 99, the version promoted
+    to production - see TECHNICAL_REPORT.md Section 14). Resamples in-plane
+    to a common physical spacing before percentile-normalizing and resizing
+    to the network's fixed input size - fixes a real generalization failure
+    (Section 11): the previous naive-resize preprocessing made the model
+    implicitly assume "the heart fills the frame", failing completely on an
+    external scan whose heart was a smaller, off-center feature.
+
+    Implemented as a direct scale-factor resize (spacing_xy is a known scalar
+    here, not a full SimpleITK Image with spacing metadata attached) rather
+    than training/imaging_common.py's SimpleITK-based resampling - the two
+    are mathematically equivalent (resizing to a target physical spacing then
+    resizing to a fixed canvas size is the same composition of scale factors
+    either way), just simpler to express without reconstructing a SimpleITK
+    Image object for a single already-loaded array.
+    """
     import tensorflow as tf
-    slices = []
     vol = vol.astype(np.float32)
-    vol = (vol - vol.min()) / (vol.max() - vol.min() + 1e-8)
-    for i in range(vol.shape[2]):
-        sl = vol[:, :, i]
-        sl = tf.image.resize(sl[..., None], target_size, method="bilinear").numpy().squeeze()
+
+    scale = spacing_xy / TARGET_INPLANE_SPACING_MM
+    resampled_h = max(1, int(round(vol.shape[0] * scale)))
+    resampled_w = max(1, int(round(vol.shape[1] * scale)))
+
+    lo, hi = np.percentile(vol, [percentile_low, percentile_high])
+    if hi <= lo:
+        vol_norm = np.zeros_like(vol, dtype=np.float32)
+    else:
+        vol_norm = np.clip((vol - lo) / (hi - lo), 0.0, 1.0).astype(np.float32)
+
+    slices = []
+    for i in range(vol_norm.shape[2]):
+        sl = tf.image.resize(vol_norm[:, :, i][..., None], (resampled_h, resampled_w), method="bilinear")
+        sl = tf.image.resize(sl, target_size, method="bilinear").numpy().squeeze()
         slices.append(sl)
     X = np.array(slices)[..., None]
     return X
@@ -430,12 +467,13 @@ def localize_and_preprocess_volume(unet_model, vol: np.ndarray, target_size=(128
     return X, chosen_boxes
 
 
-def generate_gradcam_overlay(unet_model, vol: np.ndarray, target_class_idx: int = 2):
+def generate_gradcam_overlay(unet_model, vol: np.ndarray, spacing_xy: float = TARGET_INPLANE_SPACING_MM,
+                              target_class_idx: int = 2):
     import tensorflow as tf
     from PIL import Image
     import matplotlib.pyplot as plt
 
-    X = preprocess_volume_for_unet(vol)
+    X = preprocess_volume_for_unet(vol, spacing_xy)
     preds = unet_model.predict(X, verbose=0)  # (n, h, w, C)
     masks = np.argmax(preds, axis=-1)
 

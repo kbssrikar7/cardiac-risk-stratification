@@ -176,12 +176,12 @@ def gradcam(file: UploadFile = File(...)):
             raise HTTPException(status_code=500, detail=f"U-Net model unavailable: {e}")
 
         try:
-            vol = ml.load_nii_volume(tmp_path)
+            vol, spacing_xy = ml.load_nii_volume(tmp_path)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Could not read MRI volume: {e}")
 
         try:
-            overlay_img, best_idx = ml.generate_gradcam_overlay(unet_model, vol, target_class_idx=2)
+            overlay_img, best_idx = ml.generate_gradcam_overlay(unet_model, vol, spacing_xy, target_class_idx=2)
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Grad-CAM generation failed: {e}")
     finally:

@@ -86,13 +86,17 @@ def load_and_resample_volume(path: str, target_spacing_xy: float = TARGET_INPLAN
 
 
 def preprocess_volume_for_unet(path: str, target_size=(128, 128),
-                                target_spacing_xy: float = TARGET_INPLANE_SPACING_MM) -> np.ndarray:
+                                target_spacing_xy: float = TARGET_INPLANE_SPACING_MM,
+                                percentile_low: float = 10.0, percentile_high: float = 90.0) -> np.ndarray:
     """Inference-time preprocessing: isotropic in-plane resample -> percentile
     normalize -> per-slice resize to target_size. Returns (n_slices, H, W, 1),
     matching preprocess_volume_for_unet's existing return shape elsewhere in
-    this project (backend/app/ml.py, training/compute_infarct_features_test.py)."""
+    this project (backend/app/ml.py, training/compute_infarct_features_test.py).
+    percentile_low/high default to 10/90 (Section 12's validated 5-class
+    result); pass tighter bounds (e.g. 1/99) to preserve more dynamic range -
+    Section 12's 3-class candidate found 10/90 cost real myocardium Dice."""
     vol = load_and_resample_volume(path, target_spacing_xy, interpolator=sitk.sitkLinear).astype(np.float32)
-    vol = percentile_normalize(vol)
+    vol = percentile_normalize(vol, percentile_low, percentile_high)
     slices = []
     for i in range(vol.shape[2]):
         sl = tf.image.resize(vol[:, :, i][..., None], target_size, method="bilinear").numpy().squeeze()
@@ -102,7 +106,8 @@ def preprocess_volume_for_unet(path: str, target_size=(128, 128),
 
 def load_paired_slices_for_training(image_path: str, mask_path: str, target_size=(128, 128),
                                      num_classes: int = 5,
-                                     target_spacing_xy: float = TARGET_INPLANE_SPACING_MM):
+                                     target_spacing_xy: float = TARGET_INPLANE_SPACING_MM,
+                                     percentile_low: float = 10.0, percentile_high: float = 90.0):
     """Training-time preprocessing for one patient: resamples image AND mask
     to the identical in-plane grid (linear for the image, nearest-neighbor
     for the integer mask, so label values stay exact), then percentile-
@@ -121,7 +126,7 @@ def load_paired_slices_for_training(image_path: str, mask_path: str, target_size
     mask_vol = np.transpose(sitk.GetArrayFromImage(resampled_mask), (2, 1, 0)).astype(np.int32)
     mask_vol = np.clip(mask_vol, 0, num_classes - 1)
 
-    vol = percentile_normalize(vol)
+    vol = percentile_normalize(vol, percentile_low, percentile_high)
 
     Xs, Ys = [], []
     for z in range(vol.shape[2]):

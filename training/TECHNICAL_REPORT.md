@@ -218,3 +218,35 @@ This is a real, honest, mixed result, not a clean win: no-reflow gets a genuine 
 **Diagnosis**: the gap between "each stage looks excellent in isolation" and "the full pipeline is worse than a single-shot model" is classic cascade error compounding - Stage 1's own imperfect myocardium boundary (a 3-class decision, itself slightly weaker in isolation than the isotropic single-shot model's direct myocardium output) limits what Stage 2 can recover within that region, and Stage 2's errors likewise propagate into Stage 3. The teacher-forced per-stage numbers measure each stage's ceiling given a perfect upstream input, not what the deployed system would actually achieve.
 
 **Conclusion: not promoted.** The cascade is not a net improvement over Section 12's isotropic model on this 100-patient cohort - it trades a first-ever non-zero no-reflow signal for a real regression on every other class, both internally and on external validation. This is reported as a genuine, informative negative result per this project's established practice (Sections 8, 9): the mechanism CaRe-CNN uses for the rare class does appear to help that specific class even at this smaller scale, but a hand-built 3-model cascade introduces enough end-to-end error compounding to lose more than it gains, at least in this implementation. `training/retrain_unet_cascaded.py`, `training/unet_cascaded_stage{1,2,3}.h5` are kept as documented, tested artifacts. Confirming whether a properly-engineered cascade (e.g., joint fine-tuning of all three stages end-to-end after this per-stage pretraining, which CaRe-CNN's own approach implies but this implementation does not attempt) closes the gap is future work, not something this result already answers.
+
+## 14. Promoting the isotropic fix to the live model, and a real accuracy/robustness trade-off
+
+Section 12 validated isotropic in-plane resampling on the offline 5-class model with no internal cost. The model actually served by `/gradcam` is a separately-trained 3-class model (`unet_multiclass.h5`), so the fix was retrained there too (`training/retrain_unet_patient_split_isotropic.py`) before any promotion decision - Section 12's result does not automatically transfer to a differently-trained model.
+
+**First attempt (10th/90th percentile clipping, matching Section 12 exactly) showed a real cost this time**, evaluated against the live model's actual documented native-preprocessing baseline (Section 4.1: cavity 0.926, myocardium 0.810):
+
+| | Live baseline | 10/90 clip |
+|---|---|---|
+| LV cavity Dice | 0.926 | 0.871 (-0.056) |
+| Myocardium Dice | 0.810 | 0.707 (-0.104) |
+| External LGE scan | 0 (complete failure) | real detection (117 cavity + 207 myocardium px) |
+| External MSD volume | 467 px (weak) | 26,259 px |
+
+A ~10-point myocardium Dice cost for a 3-class model is more severe than the 5-class model's near-zero cost (Section 12) - plausibly because the 5-class model's other classes (infarction, no-reflow) already provide auxiliary training signal/regularization the 3-class task doesn't have, though this is not confirmed, just the most likely explanation on hand.
+
+**Searched the percentile-clipping width for a better trade-off** (`training/imaging_common.py`'s percentile bounds made configurable specifically for this search), since 10/90 is a fairly aggressive clip and myocardium - "the thinnest, most spatially precise class" per this project's own earlier notes - seemed like a plausible casualty of discarding 20% of the intensity range:
+
+| Percentile bounds | Cavity Dice | Myocardium Dice | External LGE detection | External MSD detection |
+|---|---|---|---|---|
+| Live baseline (native preprocessing) | 0.926 | 0.810 | 0 px | 467 px |
+| 10/90 | 0.871 | 0.707 | 324 px | 26,259 px |
+| 1/99 | 0.882 | 0.723 | 57 px | 3,880 px |
+| 5/95 | 0.861 | 0.710 | 26 px | **49,739 px** |
+
+**This is not a clean, monotonic dial.** 5/95 sits between 1/99 and 10/90 on the percentile axis but not on any of the four measured outcomes - it has the weakest LGE detection of the three *and* the strongest MSD detection, while its Dice is roughly tied with 10/90 despite the tighter clip. With only one training run per setting (no repeated-CV averaging, which would be the correct way to separate a real percentile effect from run-to-run initialization/shuffling noise, but was judged too expensive to run three times over for this exploration), the honest conclusion is that single-run noise is comparable in size to whatever true effect the percentile choice has. No setting cleanly dominates.
+
+**Decision: promoted 1/99** (`unet_multiclass.h5` replaced; the pre-promotion model backed up unmodified at `training/unet_multiclass_original_naive_preprocessing_backup.h5` for a trivial rollback) - the best-on-Dice of the three tried, and still a real, qualitative fix for the complete external detection failure, even if the smallest-magnitude one of the three. This was an explicit user decision made with the full trade-off table in hand, not a default or an assumption that "external robustness" automatically outweighs "in-distribution accuracy" - the myocardium cost is real (0.723 vs. 0.810 native) and should be weighed against how likely this system is to actually receive non-EMIDEC-framed scans in practice.
+
+`backend/app/ml.py`'s `preprocess_volume_for_unet` was updated to match (isotropic in-plane resample to 1.4583mm + 1st/99th percentile normalization, replacing the naive global min-max it used before) - serving the new model with the old preprocessing would have silently mismatched what it was trained on. `load_nii_volume`'s return signature changed from `vol` to `(vol, spacing_xy)` to carry the needed spacing metadata through to preprocessing; `main.py` and `generate_gradcam_overlay` were updated accordingly. Verified end-to-end through the real API and the actual browser (not just curl or a standalone script) on both a real EMIDEC patient (still a coherent, correctly-located ring, visibly weaker-intensity than before - consistent with the measured Dice cost) and the external LGE scan (a real, correctly-located hotspot on the visible myocardial wall, where there was previously nothing at all).
+
+**Not yet deployed to production** - this promotion is local (the repo's `unet_multiclass.h5` and `backend/app/ml.py`). Pushing it live requires the documented redeploy flow (rebuild the Docker image, push to GHCR, trigger a Render redeploy - see README's Redeploying section), a separate step from this local promotion.
