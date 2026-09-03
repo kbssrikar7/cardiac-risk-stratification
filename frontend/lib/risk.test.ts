@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { displayRiskLabel, riskAccent, shapRiskMismatchNote } from "./risk.ts";
 
-test("displayRiskLabel maps known ordinal codes from the stacked ensemble", () => {
+test("displayRiskLabel falls back to the ordinal-code map if a model pickle ever regresses to bare digit strings", () => {
   assert.equal(displayRiskLabel("0"), "Low Risk");
   assert.equal(displayRiskLabel("2"), "High Risk (Chronic Heart Failure)");
 });
@@ -35,7 +35,7 @@ test("shapRiskMismatchNote is null when there is no headline prediction yet", ()
   assert.equal(shapRiskMismatchNote("3", undefined), null);
 });
 
-test("shapRiskMismatchNote flags a disagreement with both readable labels, e.g. /predict's stacked ensemble vs /shap's best_xgb model can diverge for the same patient", () => {
+test("shapRiskMismatchNote flags a disagreement with both readable labels, e.g. /predict's calibrated XGBoost vs /shap's best_xgb model can diverge for the same patient", () => {
   const note = shapRiskMismatchNote("0", "3");
   assert.match(note ?? "", /Low Risk/);
   assert.match(note ?? "", /Very High Risk \(Acute Cardiac Event\)/);

@@ -1,6 +1,7 @@
-// The stacked ensemble's label encoder was fit on ordinal risk codes, so
-// /predict can return "0".."3" instead of a readable name (same behavior as
-// the original Streamlit app). Map the known ordinal codes to display labels.
+// /predict and /shap normally return a readable risk_class string directly.
+// Defensive fallback only: map the raw ordinal code back to a label in case
+// a model pickle's label_mapping ever regresses to bare digit strings again
+// (this happened once - see training/common.py's risk_score_label_mapping).
 const ORDINAL_RISK_LABELS: Record<string, string> = {
   "0": "Low Risk",
   "1": "Moderate Risk",
@@ -12,7 +13,7 @@ export function displayRiskLabel(cls: string): string {
   return ORDINAL_RISK_LABELS[cls] ?? cls;
 }
 
-// /predict (stacked ensemble) and /shap (best standalone XGBoost model) can
+// /predict (calibrated XGBoost) and /shap (best standalone XGBoost model) can
 // legitimately predict different risk classes for the same patient, since
 // they run different models. Surfacing shap.risk_class next to the headline
 // prediction without flagging a disagreement would show two contradictory

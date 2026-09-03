@@ -92,18 +92,30 @@ def load_or_train_clinical_model(csv_path: str = CSV_PATH, model_path: str = CLI
         raise FileNotFoundError(f"Training data CSV not found at {csv_path}")
 
     df = pd.read_csv(csv_path)
-    y_series = None
-    if 'Risk_Score' in df.columns:
-        y_series = df['Risk_Score']
+    if 'Risk_Score' in df.columns and 'Risk_Category' in df.columns:
+        # Risk_Score is the clean 0..N ordinal target; Risk_Category holds the
+        # human-readable name for each score. Fitting a LabelEncoder on
+        # Risk_Score.astype(str) instead (as this used to) makes classes_ the
+        # sorted *Risk_Score digit strings* ('0','1',...), not the category
+        # names - `classes[pred_idx]` then returns e.g. '2' instead of 'High
+        # Risk (Chronic Heart Failure)'. Found via E2E testing on held-out
+        # patients: predict_clinical_model returned bare digit strings.
+        y = df['Risk_Score'].astype(int).to_numpy()
+        name_by_score = df[['Risk_Score', 'Risk_Category']].drop_duplicates().set_index('Risk_Score')['Risk_Category']
+        classes = [name_by_score[i] for i in sorted(name_by_score.index)]
+        le = None
     elif 'Risk_Category' in df.columns:
-        y_series = df['Risk_Category']
+        le = LabelEncoder()
+        y = le.fit_transform(df['Risk_Category'])
+        classes = list(le.classes_)
+    elif 'Risk_Score' in df.columns:
+        le = LabelEncoder()
+        y = le.fit_transform(df['Risk_Score'].astype(str))
+        classes = list(le.classes_)
     else:
         raise ValueError("CSV must contain 'Risk_Score' or 'Risk_Category'")
 
     X = df[CLINICAL_COLS].copy().astype(float)
-    le = LabelEncoder()
-    y = le.fit_transform(y_series.astype(str))
-
     scaler = StandardScaler()
     X_scaled = scaler.fit_transform(X)
 
@@ -113,7 +125,7 @@ def load_or_train_clinical_model(csv_path: str = CSV_PATH, model_path: str = CLI
     assets = {
         "model": model,
         "scaler": scaler,
-        "classes": list(le.classes_),
+        "classes": classes,
         "label_encoder": le
     }
     joblib.dump(assets, model_path)

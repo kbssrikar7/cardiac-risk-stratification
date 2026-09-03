@@ -93,6 +93,10 @@ def test_predict_happy_path(client):
     body = resp.json()
     assert body["model_used"] in ("calibrated_xgboost", "clinical_only")
     assert body["risk_class"] in body["probabilities"]
+    # Guards against label_mapping regressing to bare ordinal codes ('0'..'3')
+    # instead of risk-category names - happened once, see training/common.py's
+    # risk_score_label_mapping().
+    assert not body["risk_class"].isdigit()
     assert sum(body["probabilities"].values()) == pytest.approx(1.0, abs=1e-3)
     assert body["rule_based_risk"]
     assert body["rule_based_reasoning"]
@@ -119,6 +123,7 @@ def test_shap_happy_path(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["contributions"], "expected at least one SHAP contribution"
+    assert not body["risk_class"].isdigit()
     abs_vals = [abs(c["shap_value"]) for c in body["contributions"]]
     assert abs_vals == sorted(abs_vals, reverse=True), "contributions must be sorted by |shap_value| desc"
 
